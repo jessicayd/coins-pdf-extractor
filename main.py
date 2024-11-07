@@ -1,122 +1,137 @@
-import camelot as c
-import pytesseract as tes
+# import tkinter as tk
+# from file_handling import upload_file
+# from capture import on_capture_button_click
+# from tkinter import filedialog
+
+# if __name__ == "__main__":
+#     tool = tk.Tk()
+#     tool.title("COINS Tool")
+
+#     upload_button = tk.Button(tool, text="Upload PDF", name='upload_button', command=lambda: upload_file(capture_button, tool))
+#     capture_button = tk.Button(tool, text="Capture table", name="capture_button", command=lambda: on_capture_button_click(tool))
+
+#     tk.Grid.columnconfigure(tool, 0, weight=1)
+#     tk.Grid.columnconfigure(tool, 1, weight=1)
+#     tk.Grid.rowconfigure(tool, 0, weight=1)
+
+#     upload_button.grid(row=0, column=0, sticky="NSEW", columnspan=2)
+
+#     tool.mainloop()
+
 import tkinter as tk
-from tkinter import filedialog
-import fitz  # PyMuPDF
-from screeninfo import get_monitors
-import regex as re
+from tkinter import filedialog, ttk, messagebox
+import camelot as c
+import matplotlib.pyplot as plt
 
-# Set up Tesseract OCR path (adjust as needed)
-tes.pytesseract.tesseract_cmd = '/usr/local/bin/tesseract'
+from tkinter import Toplevel, NW
+import fitz 
 
-# Initialize global variables
-values = [
-    "ID",
-    "Name",
-    "Latitude",
-    "Longitude",
-    "Start_Year",
-    "End_Year",
-    "Num_Coins_Found",
-    "Reference",
-    "Comment",
-    "External_Link"
-    ]
+def select_area(pdf_path):
+    doc = fitz.open(pdf_path)
+    page = doc.load_page(0)  
+    pix = page.get_pixmap()
+    image_path = "page.png"
+    pix.save(image_path)
 
-mapping = {}
-coins = []
-grouping = ""
-labels = {}
-precise_date = False
+    root = Toplevel()
+    root.title("Select Table Area")
 
-def draw(event, canvas):
-    global tlx, tly
-    tlx = event.x
-    tly = event.y
-    canvas.create_oval(tlx-2, tly-2, tlx+2, tly+2, fill="Black")
+    img = tk.PhotoImage(file=image_path)
+    root.img = img  
 
-def extract(tool, mapping):
-    pass
+    canvas = tk.Canvas(root, width=img.width(), height=img.height())
+    canvas.pack()
+    canvas.img = img  
+    canvas.create_image(0, 0, anchor=NW, image=img)  
 
-def end_draw(event, transparent, canvas, tool, mapping):
-    global brx, bry
-    brx = event.x
-    bry = event.y
+    coords = []
+    rect_id = None
 
-    capture_button = tool.children.get("capture_button")
-    
-    confirm_button = tk.Button(tool, text="Confirm", name="confirm_button", command=lambda: extract(tool, mapping))
-    
-    page_textbox = tk.Text(tool, name="page_textbox", width=3, height=1)
-    textbox_label = tk.Label(tool, text="Page #", name="textbox_label")
+    def on_click(event):
+        nonlocal rect_id
+        coords.clear()
+        coords.append((event.x, event.y))
+        if rect_id:
+            canvas.delete(rect_id)
+        rect_id = canvas.create_rectangle(event.x, event.y, event.x, event.y, outline="red")
+        print("Mouse click detected at:", event.x, event.y)
 
-    canvas.create_rectangle(tlx, tly, brx, bry, outline="black", width=5)
+    def on_drag(event):
+        if rect_id:
+            canvas.coords(rect_id, coords[0][0], coords[0][1], event.x, event.y)
 
-    # page = get_page_number()
+    def on_release(event):
+        coords.append((event.x, event.y))
+        print(f"Mouse release detected. Selected area: {coords}")
+        root.quit()  # End the mainloop
+        root.destroy()  # Close the window
 
-    tk.Grid.rowconfigure(tool, 2, weight=1)
-    textbox_label.grid(row=2, column=0, sticky="SNEW")
-    page_textbox.grid(row=2, column=1, sticky="SNEW")
+    canvas.bind("<ButtonPress-1>", on_click)
+    canvas.bind("<B1-Motion>", on_drag)
+    canvas.bind("<ButtonRelease-1>", on_release)
 
-    if not re.search(r'\d+', page_textbox.get("1.0", tk.END)): # if empty
-        page_textbox.insert("1.0", str(page))
+    root.mainloop()
 
-    capture_button.config(text="Redraw?")
-    transparent.after(1000, transparent.destroy)
+    # Return the coordinates in Camelot and bbox format
+    if len(coords) == 2:
+        x1, y1 = coords[0]
+        x2, y2 = coords[1]
+        camelot_coords = [f"{x1},{y1},{x2},{y2}"]
+        bbox = (x1, y1, x2, y2)
+        print("Bounding box created successfully.")
+        return camelot_coords, bbox
+    else:
+        print("Failed to capture valid coordinates.")
+        return None, None
 
-    tk.Grid.rowconfigure(tool, 3, weight=1)
-    confirm_button.grid(row=3, column=0, sticky="SNEW", columnspan=2)
+def extract_table_with_camelot(pdf_path, table_area, output_csv_path='extracted_table.csv'):
+    try:
+        print(pdf_path)
+        print(table_area)
+        # tables = c.read_pdf(pdf_path, pages='1', flavor='stream', strip_text='\n', table_areas=table_area)
+        tables = c.read_pdf(pdf_path, pages='1', flavor='lattice', line_scale=40, line_tol=8, strip_text='\n', split_text=True)
+        if tables.n > 0:
+            c.plot(tables[0], kind='grid')
+            plt.show()
+            tables.export(output_csv_path, f='csv', compress=False)
+            print(f"Table(s) extracted and saved as {output_csv_path}")
+        else:
+            print("No tables found in the specified area.")
+    except Exception as e:
+        print(f"Extraction error: {e}")
+        messagebox.showwarning(
+            title="Oops!",
+            message="Table not found. Ensure that your bounding box is correct."
+        )
 
-    reminder = tk.Label(tool, text="Remember to fit the PDF to page!", name="reminder", font=('Helvetica', 9, 'bold'))
-    reminder.grid(row=4, column=0)
-
-def upload_file(capture_button, tool):
-    file_path = filedialog.askopenfilename(filetypes=[("PDF files", "*.pdf"), ("All files", "*.*")])
-    if file_path:
-        global file
-        file = file_path
-
-        mapping = {}
-
-        tk.Grid.rowconfigure(tool, 1, weight=1)
-        capture_button.grid(row=1, column=0, sticky="NSEW", columnspan=2)
-
-def on_capture_button_click(tool, mapping):
-    transparent = tk.Tk()
-    transparent.overrideredirect(True)
-
-    screen_width = transparent.winfo_screenwidth()
-    screen_height = transparent.winfo_screenheight()
-    transparent.geometry(f"{screen_width}x{screen_height}+0+0")
-    
-    canvas = tk.Canvas(transparent)
-    canvas.pack(fill=tk.BOTH, expand=True)
-
-    capture_button = tool.children.get("capture_button")
-    capture_button.config(text="...")
-
-    transparent.attributes("-alpha", 0.5)
-
-    canvas.bind("<ButtonPress-1>", lambda event: draw(event, canvas))
-    canvas.bind("<ButtonRelease-1>", lambda event: end_draw(event, transparent, canvas, tool, mapping))
-
-def main_loop():
+def main():
     tool = tk.Tk()
-    tool.title("COINS Tool")
+    tool.title("PDF Table Extractor")
 
-    upload_button = tk.Button(tool, text="Upload PDF", name='upload_button', command=lambda: upload_file(capture_button, tool))
-    capture_button = tk.Button(tool, text="Capture table", name="capture_button", command=lambda: on_capture_button_click(tool, mapping))
+    def upload_file():
+        pdf_path = filedialog.askopenfilename(title="Select PDF File", filetypes=[("PDF files", "*.pdf")])
+        if pdf_path:
+            tool.file = pdf_path
+            print(f"File selected: {pdf_path}")
+            capture_button.config(state="normal")
 
-    tk.Grid.columnconfigure(tool, 0, weight=1)
-    tk.Grid.columnconfigure(tool, 1, weight=1)
-    tk.Grid.rowconfigure(tool, 0, weight=1)
+    def on_capture_button_click():
+        if hasattr(tool, 'file') and tool.file:
+            table_area, bbox = select_area(tool.file)
+            print(table_area)
+            if table_area:
+                extract_table_with_camelot(tool.file, table_area)
+        else:
+            print("No file selected.")
+            messagebox.showwarning(title="Error", message="No PDF file selected.")
 
-    upload_button.grid(row=0, column=0, sticky="NSEW", columnspan=2)
+    upload_button = tk.Button(tool, text="Upload PDF", command=upload_file)
+    capture_button = tk.Button(tool, text="Capture Table", state="disabled", command=on_capture_button_click)
+
+    upload_button.grid(row=0, column=0, padx=10, pady=10)
+    capture_button.grid(row=0, column=1, padx=10, pady=10)
 
     tool.mainloop()
 
-
-# Run the function to open PDF and select bounding box
 if __name__ == "__main__":
-    print("hi")
-    main_loop()
+    main()
