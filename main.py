@@ -4,6 +4,31 @@ import threading
 import os
 import camelot as c
 import pandas as pd
+import pdfplumber
+import matplotlib.pyplot as plt
+import subprocess
+
+def preprocess_pdf_with_ocr(input_pdf_path, output_pdf_path):
+    print("entered")
+    try:
+        # Build the command for the subprocess call
+        command = [
+            "ocrmypdf",
+            "--redo-ocr",
+            input_pdf_path,
+            output_pdf_path
+        ]
+        # Execute the command
+        subprocess.run(command, check=True)
+        print(f"OCR completed for {input_pdf_path}. Output saved to {output_pdf_path}")
+        return output_pdf_path
+    except subprocess.CalledProcessError as e:
+        print(f"OCR processing failed for {input_pdf_path}: {e}")
+        return None
+    except FileNotFoundError:
+        print("The 'ocrmypdf' command is not found. Make sure it is installed and available in your PATH.")
+        return None
+
 
 # Define the custom columns
 values = [
@@ -32,28 +57,55 @@ def extract_tables_with_camelot(pdf_path, save_folder, status_label, buttons, to
             pdf_path, 
             pages='all',
             flavor='lattice',
-            line_scale=40,
-            line_tol=8,
+            line_scale=60,
+            line_tol=10,
             strip_text='\n',
             split_text=True
         )
         
+        print("1")
+        print(tables.n)
+        print("2")
+        # tables = c.read_pdf(
+        #     pdf_path,
+        #     pages="all",
+        #     flavor="stream",  # Use 'stream' for spacing-based detection
+        #     row_tol=10,  # Tolerance for detecting rows (adjust based on spacing)
+        #     edge_tol=50,  # Tolerance for detecting columns based on text alignment
+        #     strip_text="\n",  # Remove unwanted newline characters
+        #     split_text=True,  # Split merged text into separate cells
+        # )
+
+
         if tables.n > 0:
+            print("error1")
             for i, table in enumerate(tables):
-                print(f"Processing Table {i+1}")
-                df = table.df
-                df.columns = df.iloc[0]
-                df = df[1:].reset_index(drop=True)
-                df = handle_category_rows(df)
+                print(f"error2 {i}")
+                c.plot(table, kind="grid")
+                plt.title("Grid View - Detected Table")
+                plt.show()
 
-                complete = threading.Event()
+                c.plot(table, kind="contour")
+                plt.title("Contour View - Detected Table")
+                plt.show()
+                print(table.parsing_report)
 
-                def close_mapping():
-                    complete.set()
+                # print(f"Processing Table {i+1}")
+                # df = table.df
+                # df.columns = df.iloc[0]
+                # df = df[1:].reset_index(drop=True)
+                # df = handle_category_rows(df)
 
-                create_mapping_window(df, tool, save_folder, pdf_path, table_num=i+1, close_callback=close_mapping)
-                complete.wait()
-                
+                # complete = threading.Event()
+
+                # def close_mapping():
+                #     complete.set()
+
+                # create_mapping_window(df, tool, save_folder, pdf_path, table_num=i+1, close_callback=close_mapping)
+                # complete.wait()
+            
+            output_csv_path = os.path.join(save_folder, f"{pdf_path}_table.csv")
+            tables.export(output_csv_path, f='csv', compress=False)
             status_label.config(text="Mapping complete for all tables.")
         else:
             print("No tables found in the PDF.")
@@ -163,11 +215,43 @@ def main():
 
     def on_capture_button_click():
         if hasattr(tool, 'file') and tool.file and save_folder.get():
-            thread = threading.Thread(target=extract_tables_with_camelot, args=(tool.file, save_folder.get(), status_label, [upload_button, choose_folder_button, capture_button], tool))
-            thread.start()
+            extract_tables_with_camelot(
+                tool.file, save_folder.get(), status_label,
+                [upload_button, choose_folder_button, capture_button], tool)
         else:
             print("No file or save folder selected.")
             messagebox.showwarning(title="Error", message="No PDF file or save folder selected.")
+
+    # def on_capture_button_click():
+    #     if hasattr(tool, 'file') and tool.file and save_folder.get():
+    #         # Define the path for the OCR-processed PDF
+    #         ocr_output_path = os.path.join(save_folder.get(), f"{tool.file}_ocr_processed.pdf")
+
+    #         print("here")
+    #         # Run OCR preprocessing
+    #         processed_pdf = preprocess_pdf_with_ocr(tool.file, ocr_output_path)
+            
+    #         if processed_pdf:
+    #             # Proceed with table extraction
+    #             print(processed_pdf)
+    #             extract_tables_with_camelot(
+    #                 tool.file, save_folder.get(), status_label,
+    #                 [upload_button, choose_folder_button, capture_button], tool
+    #             )
+    #         else:
+    #             print("OCR preprocessing failed.")
+    #             messagebox.showwarning(title="Error", message="OCR preprocessing failed.")
+    #     else:
+    #         print("No file or save folder selected.")
+    #         messagebox.showwarning(title="Error", message="No PDF file or save folder selected.")
+
+    # def on_capture_button_click():
+    #     if hasattr(tool, 'file') and tool.file and save_folder.get():
+    #         thread = threading.Thread(target=extract_tables_with_camelot, args=(tool.file, save_folder.get(), status_label, [upload_button, choose_folder_button, capture_button], tool))
+    #         thread.start()
+    #     else:
+    #         print("No file or save folder selected.")
+    #         messagebox.showwarning(title="Error", message="No PDF file or save folder selected.")
 
     upload_button = tk.Button(tool, text="Upload PDF", command=upload_file)
     choose_folder_button = tk.Button(tool, text="Choose Save Folder", command=choose_save_folder)
